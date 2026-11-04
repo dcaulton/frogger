@@ -1,8 +1,22 @@
 (ns frogger.core)
 
+(def hop-size 40)
+
+;; simple 8x8-ish pixel frog (1 = green, 2 = dark green, 0 = transparent)
+(def frog-pixels
+  [[0 0 1 1 1 1 0 0]
+   [0 1 1 1 1 1 1 0]
+   [1 2 1 1 1 1 2 1]
+   [1 1 1 1 1 1 1 1]
+   [0 1 1 2 2 1 1 0]
+   [0 1 1 1 1 1 1 0]
+   [1 1 0 0 0 0 1 1]
+   [1 0 0 0 0 0 0 1]])
+
 (defonce state
   (atom {:frog {:x 400 :y 360}
          :keys #{}
+         :prev-keys #{}          ; for edge detection
          :dead? false
          :dead-until 0
          :won? false
@@ -22,7 +36,7 @@
 (defn collides? [frog car lane-y]
   (let [fx (:x frog) fy (:y frog)
         cx (:x car)  cy lane-y
-        fw 30 fh 30
+        fw 32 fh 32
         cw (:w car) ch 24]
     (and (< fx (+ cx cw))
          (> (+ fx fw) cx)
@@ -45,6 +59,18 @@
                      :color (rand-nth colors)
                      :life 120})]
     (swap! state assoc :confetti (vec particles) :won? true)))
+
+(defn draw-frog! [ctx x y]
+  (let [pixel 4] ; each "pixel" is 4x4 screen pixels
+    (doseq [row (range (count frog-pixels))
+            col (range (count (first frog-pixels)))]
+      (let [v (get-in frog-pixels [row col])]
+        (when (pos? v)
+          (set! (.-fillStyle ctx) (if (= v 2) "#166534" "#4ade80"))
+          (.fillRect ctx
+                     (+ x (* col pixel) -16)
+                     (+ y (* row pixel) -16)
+                     pixel pixel))))))
 
 (defn draw! [ctx]
   (let [canvas (.-canvas ctx)
@@ -83,11 +109,8 @@
         (set! (.-fillStyle ctx) "#facc15")
         (.fillText ctx "☠️" (- (:x frog) 16) (+ (:y frog) 10)))
       (when-not won?
-        (let [{:keys [x y]} frog]
-          (set! (.-fillStyle ctx) "#4ade80")
-          (.fillRect ctx (- x 15) (- y 15) 30 30))))
+        (draw-frog! ctx (:x frog) (:y frog))))
 
-    ;; win message
     (when won?
       (set! (.-fillStyle ctx) "#fef08a")
       (set! (.-font ctx) "28px sans-serif")
@@ -95,16 +118,14 @@
 
 (defn update! []
   (let [now (js/Date.now)
-        {:keys [dead? dead-until won? keys frog]} @state]
+        {:keys [dead? dead-until won? keys prev-keys frog]} @state]
     (cond
-      ;; death timer
       dead?
       (when (>= now dead-until)
         (swap! state assoc
                :dead? false
                :frog {:x 400 :y 360}))
 
-      ;; already won — just animate confetti
       won?
       (swap! state update :confetti
              (fn [ps]
@@ -113,18 +134,25 @@
                             (-> p
                                 (update :x + (:vx p))
                                 (update :y + (:vy p))
-                                (update :vy + 0.15) ; gravity
+                                (update :vy + 0.15)
                                 (update :life dec))))
                     (filterv #(pos? (:life %))))))
 
-      ;; normal play
       :else
       (do
-        (let [speed 4]
-          (when (keys "ArrowLeft")  (swap! state update-in [:frog :x] - speed))
-          (when (keys "ArrowRight") (swap! state update-in [:frog :x] + speed))
-          (when (keys "ArrowUp")    (swap! state update-in [:frog :y] - speed))
-          (when (keys "ArrowDown")  (swap! state update-in [:frog :y] + speed)))
+        ;; hop on key press (edge), not while held
+        (let [just-pressed (clojure.set/difference keys prev-keys)]
+          (when (just-pressed "ArrowLeft")
+            (swap! state update-in [:frog :x] - hop-size))
+          (when (just-pressed "ArrowRight")
+            (swap! state update-in [:frog :x] + hop-size))
+          (when (just-pressed "ArrowUp")
+            (swap! state update-in [:frog :y] - hop-size))
+          (when (just-pressed "ArrowDown")
+            (swap! state update-in [:frog :y] + hop-size)))
+
+        ;; remember keys for next frame
+        (swap! state assoc :prev-keys keys)
 
         ;; wrap cars
         (swap! state update :lanes
@@ -143,14 +171,12 @@
                                            cars)))))
                        lanes)))
 
-        ;; collision
         (when (any-collision?)
           (swap! state assoc
                  :dead? true
                  :dead-until (+ now 3000)))
 
-        ;; victory
-        (when (< (:y frog) 40)
+        (when (< (:y (:frog @state)) 40)
           (spawn-confetti!))))))
 
 (defn game-loop [ctx]
