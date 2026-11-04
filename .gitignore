@@ -1,0 +1,21 @@
+# shadow-cljs
+.shadow-cljs/
+public/js/
+.cpcache/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Clojure
+.nrepl-port
+.lsp/
+
+# OS / editors
+.DS_Store
+*.log
+.idea/
+.vscode/
+*.iml
