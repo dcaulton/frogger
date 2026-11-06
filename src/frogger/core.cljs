@@ -39,37 +39,26 @@
    :log   log-pixels})
 
 (def colors
-  {1 "#4ade80"   ; light green
-   2 "#166534"   ; dark green
-   3 "#1f2937"}) ; dark (wheels etc.)
+  {1 "#4ade80"
+   2 "#166534"
+   3 "#1f2937"
+   4 "#65a30d"}) ; lily pad green
 
-;; ---------- level definition ----------
-;; This is the only place you describe a level.
-;; :type is a placeholder for future behavior (:log, :crocodile, etc.)
+;; ---------- level ----------
 (def level-1
   {:name "Level 1"
    :frog {:x 400 :y 360}
+   :homes [{:x 80} {:x 220} {:x 360} {:x 500} {:x 640}]  ; lily pads
    :lanes
-   [{:y 280
-     :speed 2.2
-     :type :car
-     :entities [{:x 80  :w 70}
-                {:x 280 :w 60}
-                {:x 520 :w 80}]}
-    {:y 200
-     :speed -1.8
-     :type :truck
-     :entities [{:x 40  :w 120}
-                {:x 300 :w 140}
-                {:x 560 :w 110}]}
-    {:y 120
-     :speed 1.4
-     :type :log          ; placeholder – later the frog can ride these
-     :entities [{:x 100 :w 100}
-                {:x 350 :w 130}
-                {:x 600 :w 90}]}]})
+   [{:y 280 :speed 2.2 :type :car
+     :entities [{:x 80 :w 70} {:x 280 :w 60} {:x 520 :w 80}]}
+    {:y 200 :speed -1.8 :type :truck
+     :entities [{:x 40 :w 120} {:x 300 :w 140} {:x 560 :w 110}]}
+    {:y 120 :speed 1.4 :type :log
+     :entities [{:x 100 :w 100} {:x 350 :w 130} {:x 600 :w 90}]}
+    {:y 60 :speed -1.1 :type :log
+     :entities [{:x 50 :w 110} {:x 280 :w 140} {:x 520 :w 100}]}]})
 
-;; ---------- helpers ----------
 (defn make-state [level]
   {:frog (:frog level)
    :keys #{}
@@ -78,9 +67,10 @@
    :dead-until 0
    :won? false
    :confetti []
+   :occupied-homes #{}          ; set of home indices that are filled
+   :homes (:homes level)
    :lanes (mapv (fn [lane]
-                  (assoc lane
-                         :pixel-map (get pixel-maps (:type lane) car-pixels)))
+                  (assoc lane :pixel-map (get pixel-maps (:type lane) car-pixels)))
                 (:lanes level))})
 
 (defonce state (atom (make-state level-1)))
@@ -97,13 +87,26 @@
          (< fy (+ ey eh))
          (> (+ fy fh) ey))))
 
-(defn any-collision? []
+(defn on-log? []
   (let [{:keys [frog lanes]} @state]
     (some (fn [lane]
-            ;; only cars/trucks kill for now; logs will be rideable later
+            (when (= :log (:type lane))
+              (some #(collides? frog % (:y lane)) (:entities lane))))
+          lanes)))
+
+(defn deadly-collision? []
+  (let [{:keys [frog lanes]} @state]
+    (some (fn [lane]
             (when (#{:car :truck} (:type lane))
               (some #(collides? frog % (:y lane)) (:entities lane))))
           lanes)))
+
+(defn home-index-at [x]
+  (let [homes (:homes @state)]
+    (first (keep-indexed
+            (fn [i h]
+              (when (< (Math/abs (- x (:x h))) 30) i))
+            homes))))
 
 (defn spawn-confetti! []
   (let [palette ["#facc15" "#f472b6" "#60a5fa" "#4ade80" "#fb923c" "#c084fc"]
@@ -121,34 +124,31 @@
           col (range (count (first pixels)))]
     (when-let [c (get colors (get-in pixels [row col]))]
       (set! (.-fillStyle ctx) c)
-      (.fillRect ctx
-                 (+ x (* col scale))
-                 (+ y (* row scale))
-                 scale scale))))
+      (.fillRect ctx (+ x (* col scale)) (+ y (* row scale)) scale scale))))
 
 (defn draw! [ctx]
   (let [canvas (.-canvas ctx)
-        {:keys [frog lanes dead? won? confetti]} @state]
+        {:keys [frog lanes dead? won? confetti homes occupied-homes]} @state]
     (set! (.-fillStyle ctx) "#1a1a2e")
     (.fillRect ctx 0 0 (.-width canvas) (.-height canvas))
 
-    ;; home
-    (set! (.-fillStyle ctx) "#14532d")
-    (.fillRect ctx 0 0 (.-width canvas) 50)
-    (set! (.-fillStyle ctx) "#86efac")
-    (set! (.-font ctx) "16px sans-serif")
-    (.fillText ctx "HOME" 370 30)
+    ;; homes / lily pads
+    (doseq [[i h] (map-indexed vector homes)]
+      (set! (.-fillStyle ctx) (if (occupied-homes i) "#166534" "#14532d"))
+      (.beginPath ctx)
+      (.arc ctx (:x h) 30 22 0 (* 2 Math/PI))
+      (.fill ctx)
+      (when-not (occupied-homes i)
+        (set! (.-fillStyle ctx) "#86efac")
+        (set! (.-font ctx) "12px sans-serif")
+        (.fillText ctx "○" (- (:x h) 6) 34)))
 
     ;; lanes + entities
     (doseq [lane lanes]
       (set! (.-fillStyle ctx) "#16213e")
       (.fillRect ctx 0 (- (:y lane) 22) (.-width canvas) 44)
       (doseq [ent (:entities lane)]
-        (draw-pixels! ctx
-                      (:pixel-map lane)
-                      (:x ent)
-                      (- (:y lane) 16)
-                      4)))
+        (draw-pixels! ctx (:pixel-map lane) (:x ent) (- (:y lane) 16) 4)))
 
     ;; confetti
     (doseq [p confetti]
@@ -170,7 +170,7 @@
 
 (defn update! []
   (let [now (js/Date.now)
-        {:keys [dead? dead-until won? keys prev-keys]} @state]
+        {:keys [dead? dead-until won? keys prev-keys frog]} @state]
     (cond
       dead?
       (when (>= now dead-until)
@@ -197,6 +197,15 @@
           (when (just "ArrowDown")  (swap! state update-in [:frog :y] + hop-size)))
         (swap! state assoc :prev-keys keys)
 
+        ;; ride logs: if on a log, move with it
+        (when-let [lane (some (fn [l]
+                                (when (and (= :log (:type l))
+                                           (some #(collides? (:frog @state) % (:y l))
+                                                 (:entities l)))
+                                  l))
+                              (:lanes @state))]
+          (swap! state update-in [:frog :x] + (:speed lane)))
+
         ;; move + wrap entities
         (swap! state update :lanes
                (fn [lanes]
@@ -214,11 +223,25 @@
                                            ents)))))
                        lanes)))
 
-        (when (any-collision?)
+        ;; death
+        (when (deadly-collision?)
           (swap! state assoc :dead? true :dead-until (+ now 3000)))
 
-        (when (< (:y (:frog @state)) 40)
-          (spawn-confetti!))))))
+        ;; home landing
+        (when (< (:y (:frog @state)) 50)
+          (if-let [idx (home-index-at (:x (:frog @state)))]
+            (if (contains? (:occupied-homes @state) idx)
+              ;; already occupied → death
+              (swap! state assoc :dead? true :dead-until (+ now 3000))
+              ;; occupy it
+              (do
+                (swap! state update :occupied-homes conj idx)
+                (swap! state assoc :frog {:x 400 :y 360})
+                (when (= (count (:occupied-homes @state))
+                         (count (:homes @state)))
+                  (spawn-confetti!))))
+            ;; missed the pads
+            (swap! state assoc :dead? true :dead-until (+ now 3000))))))))
 
 (defn game-loop [ctx]
   (update!)
