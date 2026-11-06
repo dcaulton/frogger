@@ -271,6 +271,14 @@
 
           (when (deadly-collision?)
             (swap! state assoc :dead? true :dead-until (+ now 3000)))
+          ;; die if frog leaves the canvas horizontally, and pin the skull to the edge
+          (let [fx (:x (:frog @state))]
+            (when (or (< fx 0) (> fx canvas-width))
+              (swap! state assoc
+                    :dead? true
+                    :dead-until (+ now 3000)
+                    :frog (assoc (:frog @state)
+                                  :x (if (< fx 0) 16 (- canvas-width 16))))))
 
           (when (< (:y (:frog @state)) 50)
             (if-let [idx (home-index-at (:x (:frog @state)))]
