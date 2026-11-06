@@ -1,4 +1,3 @@
-```markdown
 # Frogger
 
 A small Frogger-style game written in ClojureScript.  
@@ -79,4 +78,3 @@ shadow-cljs.edn         # build config
 
 The level (lanes, entities, colors, homes) is plain data near the top of `core.cljs`.  
 Edit it and reload to change the layout.
-```
