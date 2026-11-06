@@ -1,6 +1,5 @@
 # shadow-cljs
 .shadow-cljs/
-public/js/
 .cpcache/
 
 # Node

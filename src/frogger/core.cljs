@@ -1,4 +1,5 @@
-(ns frogger.core)
+(ns frogger.core
+  (:require [clojure.set :as set]))
 
 (def hop-size 40)
 (def canvas-width 800)
@@ -237,7 +238,7 @@
                             (filterv #(pos? (:life %))))))
         :else
         (do
-          (let [just (clojure.set/difference keys prev-keys)]
+          (let [just (set/difference keys prev-keys)]
             (when (just "ArrowLeft")  (swap! state update-in [:frog :x] - hop-size))
             (when (just "ArrowRight") (swap! state update-in [:frog :x] + hop-size))
             (when (just "ArrowUp")    (swap! state update-in [:frog :y] - hop-size))
@@ -297,7 +298,9 @@
   (js/requestAnimationFrame #(game-loop ctx)))
 
 (defn close-game! []
-  (swap! state assoc :closed? true))
+  (swap! state assoc :closed? true)
+  (when-let [canvas (js/document.getElementById "game")]
+    (.remove canvas)))
 
 (defn init []
   (let [canvas (js/document.getElementById "game")
